@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "sourceMap": true,
+    "outFile": "client_build.js",
+    "target": "es5",
+    "module": "AMD",
+    "moduleResolution": "node",
+    "strict": true,
+    "allowJs": true,
+  },
+  "files": [
+    "client-new.ts"
+  ],
+}

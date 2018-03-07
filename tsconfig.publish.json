@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target": "es5",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "strictNullChecks": true,
+    "noImplicitAny": true,
+    "outDir": "dist",
+    "experimentalDecorators": true,
+    "declaration": true,
+    "forceConsistentCasingInFileNames": true,
+    "lib": ["es6", "dom"]
+  },
+  "include": [
+    "ts/**/*.ts"
+  ],
+  "exclude": [
+    "ts/**/*.test.ts",
+    "lib",
+    "dist",
+    "node_modules"
+  ]
+}
