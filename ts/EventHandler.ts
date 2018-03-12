@@ -1,3 +1,5 @@
+import WebSocketWrapper from "./WebSocketWrapper";
+
 // TODO: Use native "events" module if in Node.js environment?
 import { EventEmitter } from "eventemitter3";
 
@@ -9,7 +11,7 @@ import { EventEmitter } from "eventemitter3";
 		- `socketWrapper` - the WebSocketWrapper instance to which data should
 			be sent
 */
-export default class WebSocketChannel {
+export default abstract class EventHandler {
   // List of "special" reserved events whose listeners don't need to be wrapped
   public static NO_WRAP_EVENTS = [
     "open",
@@ -19,24 +21,16 @@ export default class WebSocketChannel {
     "disconnect"
   ];
 
-  public wrapper: any;
-  public name: any;
+  public isChannel: boolean = false;
+  public channelName: string | undefined = undefined;
 
-  private emitter: EventEmitter;
-  private wrappedListeners: WeakMap<any, any>;
-  private tempTimeout: number;
+  protected abstract wrapper: WebSocketWrapper;
 
-  constructor(name?: string, socketWrapper?: any) {
-    // Channel name; `null` only for the WebSocketWrapper instance
-    this.name = name;
-    // Reference to WebSocketWrapper instance
-    this.wrapper = socketWrapper;
-
-    // This channel's EventEmitter
-    this.emitter = new EventEmitter();
-    // WeakMap of wrapped event listeners
-    this.wrappedListeners = new WeakMap();
-  }
+  // This channel's EventEmitter
+  private emitter: EventEmitter = new EventEmitter();
+  // WeakMap of wrapped event listeners
+  private wrappedListeners: WeakMap<any, any> = new WeakMap();
+  private tempTimeout: number | undefined = undefined;
 
   /* Expose EventEmitter-like API
 		When `eventName` is one of the `NO_WRAP_EVENTS`, the event handlers
@@ -44,12 +38,8 @@ export default class WebSocketChannel {
 		EventEmitter; otherwise, event listeners are wrapped to process the
 		incoming request and the emitted events are sent to the WebSocketWrapper
 		to be serialized and sent over the WebSocket. */
-
-  public on(eventName: string, listener: any) {
-    if (
-      this.name == null &&
-      WebSocketChannel.NO_WRAP_EVENTS.indexOf(eventName) >= 0
-    ) {
+  public on(eventName: string, listener: () => void) {
+    if (this.shouldNotWrapListener(eventName)) {
       /* Note: The following is equivalent to:
 					`this._emitter.on(eventName, listener.bind(this));`
 				But thanks to eventemitter3, the following is a touch faster. */
@@ -60,11 +50,8 @@ export default class WebSocketChannel {
     return this;
   }
 
-  public once(eventName: string, listener: any) {
-    if (
-      this.name == null &&
-      WebSocketChannel.NO_WRAP_EVENTS.indexOf(eventName) >= 0
-    ) {
+  public once(eventName: string, listener: () => void) {
+    if (this.shouldNotWrapListener(eventName)) {
       this.emitter.once(eventName, listener, this);
     } else {
       this.emitter.once(eventName, this.wrapListener(listener));
@@ -72,11 +59,8 @@ export default class WebSocketChannel {
     return this;
   }
 
-  public removeListener(eventName: string, listener?: any) {
-    if (
-      this.name == null &&
-      WebSocketChannel.NO_WRAP_EVENTS.indexOf(eventName) >= 0
-    ) {
+  public removeListener(eventName: string, listener: () => void) {
+    if (this.shouldNotWrapListener(eventName)) {
       this.emitter.removeListener(eventName, listener);
     } else {
       this.emitter.removeListener(
@@ -97,10 +81,7 @@ export default class WebSocketChannel {
   }
 
   public listeners(eventName: string) {
-    if (
-      this.name == null &&
-      WebSocketChannel.NO_WRAP_EVENTS.indexOf(eventName) >= 0
-    ) {
+    if (this.shouldNotWrapListener(eventName)) {
       return this.emitter.listeners(eventName);
     } else {
       return this.emitter.listeners(eventName).map((wrapper: any) => {
@@ -112,14 +93,12 @@ export default class WebSocketChannel {
   /* The following `emit` and `request` methods will serialize and send the
 		event over the WebSocket using the WebSocketWrapper. */
   public emit(eventName: string, ...args: any[]) {
-    if (
-      typeof this.name === 'undefined' &&
-      WebSocketChannel.NO_WRAP_EVENTS.indexOf(eventName) >= 0
-    ) {
+    if (this.shouldNotWrapListener(eventName)) {
       // ERROR!!!
+      // can not do ws.emit('message', () => {})
       return this.emitter.emit.apply(this.emitter, arguments);
     } else {
-      return this.wrapper.sendEvent(this.name, eventName, arguments);
+      return this.wrapper.sendEvent(this.channelName, eventName, arguments);
     }
   }
 
@@ -131,13 +110,22 @@ export default class WebSocketChannel {
 
   public request(eventName: string) {
     const oldTimeout = this.wrapper.requestTimeout;
-    if (this.tempTimeout !== undefined) {
+    if (typeof this.tempTimeout !== "undefined") {
       this.wrapper.requestTimeout = this.tempTimeout;
       delete this.tempTimeout;
     }
-    const ret = this.wrapper.sendEvent(this.name, eventName, arguments, true);
+    const request = this.wrapper.sendEvent(
+      this.channelName,
+      eventName,
+      arguments,
+      true
+    );
     this.wrapper.requestTimeout = oldTimeout;
-    return ret;
+    return request;
+  }
+
+  private shouldNotWrapListener(eventName: string): boolean {
+    return !this.isChannel && EventHandler.NO_WRAP_EVENTS.includes(eventName);
   }
 
   private wrapListener(listener: any) {
@@ -203,7 +191,3 @@ export default class WebSocketChannel {
     return wrapped;
   }
 }
-
-// Add aliases to existing methods
-// WebSocketChannel.prototype.addListener = WebSocketChannel.prototype.on;
-// WebSocketChannel.prototype.off = WebSocketChannel.prototype.removeListener;

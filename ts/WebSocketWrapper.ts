@@ -1,6 +1,7 @@
-import WebSocketChannel from "./WebSocketChannel";
+import Channel from "./Channel";
+import EventHandler from "./EventHandler";
 
-export interface IOptions {
+export interface IConstructorOptions {
   debug?: any;
   errorToJSON?: any;
   requestTimeout?: number;
@@ -18,7 +19,7 @@ export interface IOptions {
 //   close: () => void;
 // }
 
-export default class WebSocketWrapper extends WebSocketChannel {
+export default class WebSocketWrapper extends EventHandler {
   /* Maximum number of items in the send queue.  If a user tries to send more
 	messages than this number while a WebSocket is not connected, errors will
 	be thrown. */
@@ -30,12 +31,13 @@ export default class WebSocketWrapper extends WebSocketChannel {
   // Object containing user-assigned socket data
   public data: any = {};
   public socket: any;
-  public wrapper: WebSocketWrapper;
+  public requestTimeout: number;
+
+  protected wrapper: WebSocketWrapper;
 
   // private wrapper: WebSocketWrapper;
   private debug: (msg: string, ...rest: string[]) => void;
   private errorToJSON: (err: any) => string;
-  private requestTimeout: number;
   // Flag set once the socket is opened
   private opened: boolean = false;
   // Array of data to be sent once the connection is opened
@@ -47,7 +49,7 @@ export default class WebSocketWrapper extends WebSocketChannel {
   resolve the request's Promise. */
   private pendingRequests: any = {};
 
-  constructor(socket: WebSocket, options: IOptions = {}) {
+  constructor(socket: WebSocket, options: IConstructorOptions = {}) {
     // Make `this` a WebSocketChannel
     super();
     this.wrapper = this;
@@ -87,6 +89,21 @@ export default class WebSocketWrapper extends WebSocketChannel {
     }
   }
 
+  get isConnecting() {
+    return this.socket && this.socket.readyState === this.socket.CONNECTING; // this.socket.readyState? === this.socket.constructor.CONNECTING
+  }
+
+  get isConnected() {
+    // console.log(this.socket);
+    // console.log(this.socket.readyState);
+    // console.log(this.socket.OPEN);
+
+    return (
+      // this.socket && this.socket.readyState === this.socket.constructor.OPEN
+      this.socket && this.socket.readyState === this.socket.OPEN
+    );
+  }
+
   // Rejects all pending requests and then clears the send queue
   public abort() {
     for (const id in this.pendingRequests) {
@@ -118,7 +135,7 @@ export default class WebSocketWrapper extends WebSocketChannel {
       return this;
     }
     if (!this.channels[namespace]) {
-      this.channels[namespace] = new WebSocketChannel(namespace, this);
+      this.channels[namespace] = new Channel(namespace, this);
     }
     return this.channels[namespace];
   }
@@ -136,6 +153,64 @@ export default class WebSocketWrapper extends WebSocketChannel {
     } else {
       throw new Error("WebSocket is not connected and send queue is full");
     }
+  }
+
+  /* The following methods are called by a WebSocketChannel to send data
+		to the Socket. */
+  public sendEvent(channel: any, eventName: any, args: any, isRequest?: any) {
+    // Serialize data for sending over the socket
+    const data: any = { a: args };
+    if (channel != null) {
+      data.c = channel;
+    }
+    let request;
+    if (isRequest) {
+      /* Unless we send petabytes of data using the same socket,
+				we won't worry about `_lastRequestId` getting too big. */
+      data.i = ++this.lastRequestId;
+      // Return a Promise to the caller to be resolved later
+      request = new Promise((resolve, reject) => {
+        const pendReq: any = (this.pendingRequests[data.i] = {
+          reject,
+          resolve
+        });
+        if (this.requestTimeout > 0) {
+          pendReq.timer = setTimeout(() => {
+            reject(new Error("Request timed out"));
+            delete this.pendingRequests[data.i];
+          }, this.requestTimeout);
+        }
+      });
+    }
+    // Send the message
+    this.send(JSON.stringify(data));
+    // Return the request, if needed
+    return request;
+  }
+
+  public sendResolve(id: any, data: any) {
+    this.send(
+      JSON.stringify({
+        d: data,
+        i: id
+      }),
+      true /* ignore max queue length */
+    );
+  }
+
+  public sendReject(id: any, err: any) {
+    const isError = err instanceof Error;
+    if (isError) {
+      err = JSON.parse(this.errorToJSON(err));
+    }
+    this.send(
+      JSON.stringify({
+        _: isError ? 1 : undefined,
+        e: err,
+        i: id
+      }),
+      true /* ignore max queue length */
+    );
   }
 
   private bind(socket: WebSocket) {
@@ -181,21 +256,6 @@ export default class WebSocketWrapper extends WebSocketChannel {
     }
   }
 
-  get isConnecting() {
-    return this.socket && this.socket.readyState === this.socket.CONNECTING; // this.socket.readyState? === this.socket.constructor.CONNECTING
-  }
-
-  get isConnected() {
-    // console.log(this.socket);
-    // console.log(this.socket.readyState);
-    // console.log(this.socket.OPEN);
-
-    return (
-      // this.socket && this.socket.readyState === this.socket.constructor.OPEN
-      this.socket && this.socket.readyState === this.socket.OPEN
-    );
-  }
-
   // Called whenever the bound Socket receives a message
   private onMessage(msg: any) {
     try {
@@ -223,7 +283,7 @@ export default class WebSocketWrapper extends WebSocketChannel {
       if (
         msg.a instanceof Array &&
         msg.a.length >= 1 &&
-        (msg.c || WebSocketChannel.NO_WRAP_EVENTS.indexOf(msg.a[0]) < 0)
+        (msg.c || Channel.NO_WRAP_EVENTS.indexOf(msg.a[0]) < 0)
       ) {
         // Process inbound event/request
         const event = { name: msg.a.shift(), args: msg.a, requestId: msg.i };
@@ -287,63 +347,5 @@ export default class WebSocketWrapper extends WebSocketChannel {
       /* Note: It's also possible for uncaught exceptions from event
 				handlers to end up here. */
     }
-  }
-
-  /* The following methods are called by a WebSocketChannel to send data
-		to the Socket. */
-  private sendEvent(channel: any, eventName: any, args: any, isRequest: any) {
-    // Serialize data for sending over the socket
-    const data: any = { a: args };
-    if (channel != null) {
-      data.c = channel;
-    }
-    let request;
-    if (isRequest) {
-      /* Unless we send petabytes of data using the same socket,
-				we won't worry about `_lastRequestId` getting too big. */
-      data.i = ++this.lastRequestId;
-      // Return a Promise to the caller to be resolved later
-      request = new Promise((resolve, reject) => {
-        const pendReq: any = (this.pendingRequests[data.i] = {
-          reject,
-          resolve
-        });
-        if (this.requestTimeout > 0) {
-          pendReq.timer = setTimeout(() => {
-            reject(new Error("Request timed out"));
-            delete this.pendingRequests[data.i];
-          }, this.requestTimeout);
-        }
-      });
-    }
-    // Send the message
-    this.send(JSON.stringify(data));
-    // Return the request, if needed
-    return request;
-  }
-
-  private sendResolve(id: any, data: any) {
-    this.send(
-      JSON.stringify({
-        d: data,
-        i: id
-      }),
-      true /* ignore max queue length */
-    );
-  }
-
-  private sendReject(id: any, err: any) {
-    const isError = err instanceof Error;
-    if (isError) {
-      err = JSON.parse(this.errorToJSON(err));
-    }
-    this.send(
-      JSON.stringify({
-        _: isError ? 1 : undefined,
-        e: err,
-        i: id
-      }),
-      true /* ignore max queue length */
-    );
   }
 }

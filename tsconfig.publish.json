@@ -9,7 +9,7 @@
     "experimentalDecorators": true,
     "declaration": true,
     "forceConsistentCasingInFileNames": true,
-    "lib": ["es6", "dom"]
+    "lib": ["es7", "dom"]
   },
   "include": [
     "ts/**/*.ts"
