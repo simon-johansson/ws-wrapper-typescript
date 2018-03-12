@@ -72,7 +72,7 @@ export default class WebSocketChannel {
     return this;
   }
 
-  public removeListener(eventName: string, listener: any) {
+  public removeListener(eventName: string, listener?: any) {
     if (
       this.name == null &&
       WebSocketChannel.NO_WRAP_EVENTS.indexOf(eventName) >= 0
@@ -116,6 +116,7 @@ export default class WebSocketChannel {
       typeof this.name === 'undefined' &&
       WebSocketChannel.NO_WRAP_EVENTS.indexOf(eventName) >= 0
     ) {
+      // ERROR!!!
       return this.emitter.emit.apply(this.emitter, arguments);
     } else {
       return this.wrapper.sendEvent(this.name, eventName, arguments);
@@ -146,7 +147,7 @@ export default class WebSocketChannel {
     let wrapped = this.wrappedListeners.get(listener);
     if (!wrapped) {
       let returnVal;
-      wrapped = function channelListenerWrapper(event: any) {
+      wrapped = (event: any) => {
         /* This function is called when an event is emitted on this
 					WebSocketChannel's `_emitter` when the WebSocketWrapper
 					receives an incoming message for this channel.  If this
@@ -193,7 +194,7 @@ export default class WebSocketChannel {
           this.wrapper.sendResolve(event.requestId, returnVal);
         }
         // else return value is ignored for simple events
-      }.bind(this); // Bind the channel to the `channelListenerWrapper`
+      };
       // Add a reference back to the original listener
       wrapped.original = listener;
       this.wrappedListeners.set(listener, wrapped);

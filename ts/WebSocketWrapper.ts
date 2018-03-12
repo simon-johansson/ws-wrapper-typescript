@@ -201,9 +201,9 @@ export default class WebSocketWrapper extends WebSocketChannel {
     try {
       msg = JSON.parse(msg);
       // If `msg` contains special ignore property, we'll ignore it
-      if (msg["ws-wrapper"] === false) {
-        return;
-      }
+      // if (msg["ws-wrapper"] === false) {
+      //   return;
+      // }
       if (msg.a) {
         const argsArray: any = [];
         for (const i in msg.a) {
@@ -213,8 +213,13 @@ export default class WebSocketWrapper extends WebSocketChannel {
         }
         msg.a = argsArray;
       }
+      // console.log(msg.a instanceof Array)
+      // console.log(msg.a.length >= 1);
+      // console.log(msg.c);
+      // console.log(WebSocketChannel.NO_WRAP_EVENTS.indexOf(msg.a[0]) < 0);
+
       /* If `msg` does not have an `a` Array with at least 1 element,
-				ignore the message because it is not a valid event/request */
+        ignore the message because it is not a valid event/request */
       if (
         msg.a instanceof Array &&
         msg.a.length >= 1 &&
