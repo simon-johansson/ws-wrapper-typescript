@@ -7,6 +7,12 @@ export interface IConstructorOptions {
   requestTimeout?: number;
 }
 
+export interface IEvent {
+  name: string,
+  args: any[],
+  requestId: number;
+}
+
 // export interface IWebsocket {
 //   readyState: number;
 //   CONNECTING: number;
@@ -286,7 +292,7 @@ export default class WebSocketWrapper extends EventHandler {
         (msg.c || Channel.NO_WRAP_EVENTS.indexOf(msg.a[0]) < 0)
       ) {
         // Process inbound event/request
-        const event = { name: msg.a.shift(), args: msg.a, requestId: msg.i };
+        const event: IEvent = { name: msg.a.shift(), args: msg.a, requestId: msg.i };
         const channel = msg.c == null ? this : this.channels[msg.c];
         if (!channel) {
           if (msg.i >= 0) {

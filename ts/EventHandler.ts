@@ -1,16 +1,15 @@
-import WebSocketWrapper from "./WebSocketWrapper";
+import WebSocketWrapper, { IEvent } from "./WebSocketWrapper";
 
 // TODO: Use native "events" module if in Node.js environment?
-import { EventEmitter } from "eventemitter3";
+import { EventEmitter, ListenerFn } from "eventemitter3";
 
-/* A WebSocketChannel exposes an EventEmitter-like API for sending and handling
-	events or requests over the channel through the attached WebSocketWrapper.
+interface IWrappedListenerFn {
+  (event: IEvent): void;
+  original: ListenerFn;
+}
 
-	`var channel = new WebSocketChannel(name, socketWrapper);`
-		- `name` - the namespace for the channel
-		- `socketWrapper` - the WebSocketWrapper instance to which data should
-			be sent
-*/
+type IWrappedListeners = WeakMap<ListenerFn, IWrappedListenerFn>;
+
 export default abstract class EventHandler {
   // List of "special" reserved events whose listeners don't need to be wrapped
   public static NO_WRAP_EVENTS = [
@@ -29,37 +28,37 @@ export default abstract class EventHandler {
   // This channel's EventEmitter
   private emitter: EventEmitter = new EventEmitter();
   // WeakMap of wrapped event listeners
-  private wrappedListeners: WeakMap<any, any> = new WeakMap();
+  private wrappedListeners: IWrappedListeners = new WeakMap();
   private tempTimeout: number | undefined = undefined;
 
-  /* Expose EventEmitter-like API
-		When `eventName` is one of the `NO_WRAP_EVENTS`, the event handlers
-		are left untouched, and the emitted events are just sent to the
-		EventEmitter; otherwise, event listeners are wrapped to process the
-		incoming request and the emitted events are sent to the WebSocketWrapper
-		to be serialized and sent over the WebSocket. */
-  public on(eventName: string, listener: () => void) {
+  /*
+  Expose EventEmitter-like API
+	When `eventName` is one of the `NO_WRAP_EVENTS`, the event handlers
+	are left untouched, and the emitted events are just sent to the
+	EventEmitter; otherwise, event listeners are wrapped to process the
+	incoming request and the emitted events are sent to the WebSocketWrapper
+  to be serialized and sent over the WebSocket.
+  */
+
+  public on(eventName: string, listener: ListenerFn) {
     if (this.shouldNotWrapListener(eventName)) {
-      /* Note: The following is equivalent to:
-					`this._emitter.on(eventName, listener.bind(this));`
-				But thanks to eventemitter3, the following is a touch faster. */
-      this.emitter.on(eventName, listener, this);
+      this.emitter.on(eventName, listener);
     } else {
       this.emitter.on(eventName, this.wrapListener(listener));
     }
     return this;
   }
 
-  public once(eventName: string, listener: () => void) {
+  public once(eventName: string, listener: ListenerFn) {
     if (this.shouldNotWrapListener(eventName)) {
-      this.emitter.once(eventName, listener, this);
+      this.emitter.once(eventName, listener);
     } else {
       this.emitter.once(eventName, this.wrapListener(listener));
     }
     return this;
   }
 
-  public removeListener(eventName: string, listener: () => void) {
+  public removeListener(eventName: string, listener: ListenerFn) {
     if (this.shouldNotWrapListener(eventName)) {
       this.emitter.removeListener(eventName, listener);
     } else {
@@ -84,14 +83,14 @@ export default abstract class EventHandler {
     if (this.shouldNotWrapListener(eventName)) {
       return this.emitter.listeners(eventName);
     } else {
-      return this.emitter.listeners(eventName).map((wrapper: any) => {
-        return wrapper.original;
-      });
+      return this.emitter
+        .listeners(eventName)
+        .map((wrapper: IWrappedListenerFn) => wrapper.original);
     }
   }
 
-  /* The following `emit` and `request` methods will serialize and send the
-		event over the WebSocket using the WebSocketWrapper. */
+  // The following `emit` and `request` methods will serialize and send the
+  // event over the WebSocket using the WebSocketWrapper.
   public emit(eventName: string, ...args: any[]) {
     if (this.shouldNotWrapListener(eventName)) {
       // ERROR!!!
@@ -102,7 +101,7 @@ export default abstract class EventHandler {
     }
   }
 
-  /* Temporarily set the request timeout for the next request. */
+  // Temporarily set the request timeout for the next request.
   public timeout(tempTimeout: number) {
     this.tempTimeout = tempTimeout;
     return this;
@@ -128,66 +127,65 @@ export default abstract class EventHandler {
     return !this.isChannel && EventHandler.NO_WRAP_EVENTS.includes(eventName);
   }
 
-  private wrapListener(listener: any) {
+  private wrapListener(listener: ListenerFn) {
     if (typeof listener !== "function") {
       throw new TypeError('"listener" argument must be a function');
     }
-    let wrapped = this.wrappedListeners.get(listener);
-    if (!wrapped) {
-      let returnVal;
-      wrapped = (event: any) => {
-        /* This function is called when an event is emitted on this
-					WebSocketChannel's `_emitter` when the WebSocketWrapper
-					receives an incoming message for this channel.  If this
-					event is a request, special processing is needed to
-					send the response back over the socket.  Below we use
-					the return value from the original `listener` to
-					determine what response should be sent back.
+    const existingWrappedFn = this.wrappedListeners.get(listener);
+    if (typeof existingWrappedFn !== "undefined") {
+      return existingWrappedFn;
+    }
 
-					`this` refers to the WebSocketChannel instance
-					`event` has the following properties:
-					- `name`
-					- `args`
-					- `requestId`
-				*/
+    const newWrappedFn: IWrappedListenerFn = Object.assign(
+      (event: IEvent): void => {
+        /*
+        This function is called when an event is emitted on this
+        WebSocketChannel's `_emitter` when the WebSocketWrapper
+        receives an incoming message for this channel.  If this
+        event is a request, special processing is needed to
+        send the response back over the socket.  Below we use
+        the return value from the original `listener` to
+        determine what response should be sent back.
+
+        `this` refers to the WebSocketChannel instance
+        */
+
+        const eventIsRequest: boolean = event.requestId >= 0;
+        let listenerReturnValue: any;
+
         try {
-          returnVal = listener.apply(this, event.args);
+          listenerReturnValue = listener(...event.args);
         } catch (err) {
-          if (event.requestId >= 0) {
-            /* If event listener throws, pass that Error back
-							as a response to the request */
+          if (eventIsRequest) {
+            // If event listener throws, pass that Error back
+            // as a response to the request
             this.wrapper.sendReject(event.requestId, err);
           }
           // Re-throw
           throw err;
         }
-        if (returnVal instanceof Promise) {
-          /* If event listener returns a Promise, respond once
-						the Promise resolves */
-          returnVal
-            .then(data => {
-              if (event.requestId >= 0) {
-                this.wrapper.sendResolve(event.requestId, data);
-              }
-            })
-            .catch(err => {
-              if (event.requestId >= 0) {
-                this.wrapper.sendReject(event.requestId, err);
-              }
-              // else silently ignore error
-            });
-        } else if (event.requestId >= 0) {
-          /* Otherwise, assume that the `returnVal` is what
-						should be passed back as the response */
-          this.wrapper.sendResolve(event.requestId, returnVal);
+
+        if (listenerReturnValue instanceof Promise && eventIsRequest) {
+          // If event listener returns a Promise, respond once
+          // the Promise resolves
+          listenerReturnValue
+            .then(data => this.wrapper.sendResolve(event.requestId, data))
+            .catch(err => this.wrapper.sendReject(event.requestId, err));
+        } else if (eventIsRequest) {
+          // Otherwise, assume that the `returnVal` is what
+          // should be passed back as the response
+          this.wrapper.sendResolve(event.requestId, listenerReturnValue);
         }
         // else return value is ignored for simple events
-      };
-      // Add a reference back to the original listener
-      wrapped.original = listener;
-      this.wrappedListeners.set(listener, wrapped);
-    }
+      },
+      {
+        // Add a reference back to the original listener
+        original: listener as ListenerFn
+      }
+    );
+
+    this.wrappedListeners.set(listener, newWrappedFn);
     // Finally, return the wrapped listener
-    return wrapped;
+    return newWrappedFn;
   }
 }
