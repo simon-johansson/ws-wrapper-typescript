@@ -1,8 +1,6 @@
 /* tslint:disable:no-empty */
 
 const { Server, WebSocket } = require("mock-socket");
-// import * as WebSocket from 'universal-websocket-client';
-// import { Server as WebSocketServer } from "ws";
 import WebSocketWrapper from "../WebSocketWrapper";
 
 let wsw;
@@ -36,9 +34,7 @@ interface ICreatePayloadOptions {
 }
 
 interface IPayload {
-  a?: {
-    [propName: number]: any;
-  };
+  a?: any[];
   c?: string;
   i?: number;
   d?: any;
@@ -52,7 +48,7 @@ function createPayload(
 ) {
   const payload: IPayload = {};
   if (options.event) {
-    payload.a = { 0: options.event };
+    payload.a = [ options.event ];
   }
   if (options.channel) {
     payload.c = options.channel;
@@ -61,7 +57,7 @@ function createPayload(
     const argsArray: any = [];
     for (const i in options.args) {
       if (options.args[i]) {
-        payload.a[parseInt(i, 10) + 1] = options.args[i];
+        payload.a.push(options.args[i]);
       }
     }
   }
@@ -563,18 +559,19 @@ describe("WebSocketWrapper", () => {
       const event = "event";
       const channel = "channel";
       const data = "data";
-      const expectedPayload = createPayload({
-        channel,
-        event,
-        requestIndex: 1
-      });
+      const expectedPayload = {
+        a: [event],
+        c: channel,
+        i: 1
+      };
       const server: any = await connectToServer();
       wsw
         .of("channel")
         .request("event")
         .then(msg => {
           expect(msg).toEqual(data);
-          expect(wsw.socket.send.mock.calls[0]).toEqual([expectedPayload]);
+          const payload = JSON.parse(wsw.socket.send.mock.calls[0][0]);
+          expect(payload).toEqual(expectedPayload);
           done();
         });
       server.send(

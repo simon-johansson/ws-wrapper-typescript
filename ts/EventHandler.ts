@@ -12,21 +12,17 @@ type IWrappedListeners = WeakMap<ListenerFn, IWrappedListenerFn>;
 
 export default abstract class EventHandler {
   // List of "special" reserved events whose listeners don't need to be wrapped
-  public static NO_WRAP_EVENTS = [
-    "open",
-    "message",
-    "error",
-    "close",
-    "disconnect"
-  ];
+  public static NO_WRAP_EVENTS = ["open", "message", "error", "close", "disconnect"];
 
   public isChannel: boolean = false;
   public channelName: string | undefined = undefined;
 
+  // behöver inte vara publik?
+  public emitter: EventEmitter = new EventEmitter();
+
   protected abstract wrapper: WebSocketWrapper;
 
   // This channel's EventEmitter
-  private emitter: EventEmitter = new EventEmitter();
   // WeakMap of wrapped event listeners
   private wrappedListeners: IWrappedListeners = new WeakMap();
   private tempTimeout: number | undefined = undefined;
@@ -62,10 +58,7 @@ export default abstract class EventHandler {
     if (this.shouldNotWrapListener(eventName)) {
       this.emitter.removeListener(eventName, listener);
     } else {
-      this.emitter.removeListener(
-        eventName,
-        this.wrappedListeners.get(listener)
-      );
+      this.emitter.removeListener(eventName, this.wrappedListeners.get(listener));
     }
     return this;
   }
@@ -83,21 +76,22 @@ export default abstract class EventHandler {
     if (this.shouldNotWrapListener(eventName)) {
       return this.emitter.listeners(eventName);
     } else {
-      return this.emitter
-        .listeners(eventName)
-        .map((wrapper: IWrappedListenerFn) => wrapper.original);
+      return this.emitter.listeners(eventName).map((wrapper: IWrappedListenerFn) => wrapper.original);
     }
   }
 
-  // The following `emit` and `request` methods will serialize and send the
-  // event over the WebSocket using the WebSocketWrapper.
   public emit(eventName: string, ...args: any[]) {
     if (this.shouldNotWrapListener(eventName)) {
       // ERROR!!!
       // can not do ws.emit('message', () => {})
       return this.emitter.emit.apply(this.emitter, arguments);
     } else {
-      return this.wrapper.sendEvent(this.channelName, eventName, arguments);
+      const message = this.wrapper.messageCreator.createEmit({
+        channelName: this.channelName,
+        data: args,
+        eventName
+      });
+      return this.wrapper.sendEvent(message);
     }
   }
 
@@ -107,24 +101,37 @@ export default abstract class EventHandler {
     return this;
   }
 
-  public request(eventName: string) {
-    const oldTimeout = this.wrapper.requestTimeout;
-    if (typeof this.tempTimeout !== "undefined") {
-      this.wrapper.requestTimeout = this.tempTimeout;
-      delete this.tempTimeout;
-    }
-    const request = this.wrapper.sendEvent(
-      this.channelName,
+  public request(eventName: string, ...args: any[]) {
+    // const oldTimeout = this.wrapper.requestTimeout;
+    // if (typeof this.tempTimeout !== "undefined") {
+    //   this.wrapper.requestTimeout = this.tempTimeout;
+    //   delete this.tempTimeout;
+    // }
+
+    const message = this.wrapper.messageCreator.createRequest({
+      channelName: this.channelName,
+      data: args,
       eventName,
-      arguments,
-      true
-    );
-    this.wrapper.requestTimeout = oldTimeout;
+      timeout: this.getTimeout()
+    });
+    const request = this.wrapper.sendEvent(message);
+    // this.wrapper.requestTimeout = oldTimeout;
     return request;
   }
 
   private shouldNotWrapListener(eventName: string): boolean {
     return !this.isChannel && EventHandler.NO_WRAP_EVENTS.includes(eventName);
+  }
+
+  private getTimeout(): number {
+    let timeout: number;
+    if (typeof this.tempTimeout !== "undefined") {
+      timeout = this.tempTimeout;
+      delete this.tempTimeout;
+    } else {
+      timeout = this.wrapper.requestTimeout;
+    }
+    return timeout;
   }
 
   private wrapListener(listener: ListenerFn) {
@@ -169,7 +176,13 @@ export default abstract class EventHandler {
           // If event listener returns a Promise, respond once
           // the Promise resolves
           listenerReturnValue
-            .then(data => this.wrapper.sendResolve(event.requestId, data))
+            .then(data => {
+              const message = this.wrapper.messageCreator.createResponse({
+                data,
+                id: event.requestId
+              });
+              this.wrapper.sendResolve(event.requestId, data);
+            })
             .catch(err => this.wrapper.sendReject(event.requestId, err));
         } else if (eventIsRequest) {
           // Otherwise, assume that the `returnVal` is what

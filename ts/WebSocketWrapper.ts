@@ -1,5 +1,7 @@
 import Channel from "./Channel";
 import EventHandler from "./EventHandler";
+import MessageFactory, { Message } from "./MessageFactory";
+import MessageRequest from "./MessageFactory/MessageRequest";
 
 export interface IConstructorOptions {
   debug?: any;
@@ -8,8 +10,8 @@ export interface IConstructorOptions {
 }
 
 export interface IEvent {
-  name: string,
-  args: any[],
+  name: string;
+  args: any[];
   requestId: number;
 }
 
@@ -33,11 +35,12 @@ export default class WebSocketWrapper extends EventHandler {
 
   /* Object of WebSocketChannels (except `this` associated with this
   WebSocket); keys are the channel name. */
-  public channels: any = {};
+  public channels: {[x: string]: Channel} = {};
   // Object containing user-assigned socket data
   public data: any = {};
   public socket: any;
   public requestTimeout: number;
+  public messageCreator: MessageFactory = new MessageFactory();
 
   protected wrapper: WebSocketWrapper;
 
@@ -73,9 +76,7 @@ export default class WebSocketWrapper extends EventHandler {
     if (typeof options.errorToJSON !== "function") {
       this.errorToJSON = (err: any) => {
         if (typeof window === "undefined") {
-          return JSON.stringify({
-            message: err.message
-          });
+          return JSON.stringify({ message: err.message });
         } else {
           return JSON.stringify(err, Object.getOwnPropertyNames(err));
         }
@@ -83,10 +84,7 @@ export default class WebSocketWrapper extends EventHandler {
     } else {
       this.errorToJSON = options.errorToJSON;
     }
-    if (
-      typeof options.requestTimeout === "number" &&
-      options.requestTimeout > 0
-    ) {
+    if (typeof options.requestTimeout === "number" && options.requestTimeout > 0) {
       this.requestTimeout = options.requestTimeout || 0;
     }
 
@@ -96,18 +94,11 @@ export default class WebSocketWrapper extends EventHandler {
   }
 
   get isConnecting() {
-    return this.socket && this.socket.readyState === this.socket.CONNECTING; // this.socket.readyState? === this.socket.constructor.CONNECTING
+    return this.socket && this.socket.readyState === this.socket.CONNECTING;
   }
 
   get isConnected() {
-    // console.log(this.socket);
-    // console.log(this.socket.readyState);
-    // console.log(this.socket.OPEN);
-
-    return (
-      // this.socket && this.socket.readyState === this.socket.constructor.OPEN
-      this.socket && this.socket.readyState === this.socket.OPEN
-    );
+    return this.socket && this.socket.readyState === this.socket.OPEN;
   }
 
   // Rejects all pending requests and then clears the send queue
@@ -150,10 +141,7 @@ export default class WebSocketWrapper extends EventHandler {
     if (this.isConnected) {
       this.debug("wrapper: Sending message:", data);
       this.socket.send(data);
-    } else if (
-      ignoreMaxQueueSize ||
-      this.pendingSend.length < WebSocketWrapper.MAX_SEND_QUEUE_SIZE
-    ) {
+    } else if (ignoreMaxQueueSize || this.pendingSend.length < WebSocketWrapper.MAX_SEND_QUEUE_SIZE) {
       this.debug("wrapper: Queuing message:", data);
       this.pendingSend.push(data);
     } else {
@@ -163,45 +151,28 @@ export default class WebSocketWrapper extends EventHandler {
 
   /* The following methods are called by a WebSocketChannel to send data
 		to the Socket. */
-  public sendEvent(channel: any, eventName: any, args: any, isRequest?: any) {
-    // Serialize data for sending over the socket
-    const data: any = { a: args };
-    if (channel != null) {
-      data.c = channel;
-    }
+  public sendEvent(message: Message) {
     let request;
-    if (isRequest) {
-      /* Unless we send petabytes of data using the same socket,
-				we won't worry about `_lastRequestId` getting too big. */
-      data.i = ++this.lastRequestId;
+    if (message instanceof MessageRequest) {
       // Return a Promise to the caller to be resolved later
       request = new Promise((resolve, reject) => {
-        const pendReq: any = (this.pendingRequests[data.i] = {
-          reject,
-          resolve
-        });
+        const pendReq: any = (this.pendingRequests[message.id] = { reject, resolve });
         if (this.requestTimeout > 0) {
           pendReq.timer = setTimeout(() => {
             reject(new Error("Request timed out"));
-            delete this.pendingRequests[data.i];
+            delete this.pendingRequests[message.id];
           }, this.requestTimeout);
         }
       });
     }
     // Send the message
-    this.send(JSON.stringify(data));
+    this.send(message.JSON);
     // Return the request, if needed
     return request;
   }
 
   public sendResolve(id: any, data: any) {
-    this.send(
-      JSON.stringify({
-        d: data,
-        i: id
-      }),
-      true /* ignore max queue length */
-    );
+    this.send(JSON.stringify({ d: data, i: id }), true /* ignore max queue length */);
   }
 
   public sendReject(id: any, err: any) {
@@ -286,44 +257,25 @@ export default class WebSocketWrapper extends EventHandler {
 
       /* If `msg` does not have an `a` Array with at least 1 element,
         ignore the message because it is not a valid event/request */
-      if (
-        msg.a instanceof Array &&
-        msg.a.length >= 1 &&
-        (msg.c || Channel.NO_WRAP_EVENTS.indexOf(msg.a[0]) < 0)
-      ) {
+      if (msg.a instanceof Array && msg.a.length >= 1 && (msg.c || Channel.NO_WRAP_EVENTS.indexOf(msg.a[0]) < 0)) {
         // Process inbound event/request
-        const event: IEvent = { name: msg.a.shift(), args: msg.a, requestId: msg.i };
+        const event: IEvent = { args: msg.a, name: msg.a.shift(), requestId: msg.i };
         const channel = msg.c == null ? this : this.channels[msg.c];
         if (!channel) {
           if (msg.i >= 0) {
-            this.sendReject(
-              msg.i,
-              new Error(`Channel '${msg.c}' does not exist`)
-            );
+            this.sendReject(msg.i, new Error(`Channel '${msg.c}' does not exist`));
           }
-          this.debug(
-            `wrapper: Event '${event.name}' ignored ` +
-              `because channel '${msg.c}' does not exist.`
-          );
+          this.debug(`wrapper: Event '${event.name}' ignored ` + `because channel '${msg.c}' does not exist.`);
         } else if (channel.emitter.emit(event.name, event)) {
-          this.debug(
-            `wrapper: Event '${event.name}' sent to ` + "event listener"
-          );
+          this.debug(`wrapper: Event '${event.name}' sent to ` + "event listener");
         } else {
           if (msg.i >= 0) {
             this.sendReject(
               msg.i,
-              new Error(
-                "No event listener for '" +
-                  event.name +
-                  "'" +
-                  (msg.c ? " on channel '" + msg.c + "'" : "")
-              )
+              new Error("No event listener for '" + event.name + "'" + (msg.c ? " on channel '" + msg.c + "'" : ""))
             );
           }
-          this.debug(
-            `wrapper: Event '${event.name}' had no ` + "event listener"
-          );
+          this.debug(`wrapper: Event '${event.name}' had no ` + "event listener");
         }
       } else if (this.pendingRequests[msg.i]) {
         this.debug("wrapper: Processing response for request", msg.i);
