@@ -1,12 +1,24 @@
 <html>
 	<head>
-		<title>ws-wrapper test</title>
-		<script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/zepto/1.2.0/zepto.min.js"></script>
-		<script type="text/javascript" src="/client_build.js"></script>
+    <title>ws-wrapper test</title>
+    <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/zepto/1.2.0/zepto.min.js"></script>
 		<style type="text/css">
 			body {
 				font-family: sans-serif;
 			}
+      #loadingOverlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        height: 100%;
+        background: rgba(0,0,0,0.5);
+        color: white;
+        font-size: 50px;
+        text-align: center;
+        padding-top: 20%;
+      }
 			button, input {
 				padding: 5px 10px;
 			}
@@ -40,6 +52,7 @@
 		</style>
 	</head>
 	<body>
+    <div id="loadingOverlay">Loading...</div>
 		<h1>ws-wrapper test</h1>
 		<section id="login">
 			<input type="text" id="username" placeholder="Enter your username"/>
@@ -53,6 +66,7 @@
 		<form id="newMessage">
 			<input type="text" id="message" placeholder="Enter your message"/>
 			<button type="submit" id="sendButton">Send</button>
-		</form>
+    </form>
+		<script type="text/javascript" src="/client.js"></script>
 	</body>
 </html>

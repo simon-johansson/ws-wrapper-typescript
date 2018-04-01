@@ -2,6 +2,6 @@
   "extends": "./tsconfig.publish.json",
   "compilerOptions": {
     "sourceMap": true,
-    "watch": true,
+    "watch": true
   }
 }

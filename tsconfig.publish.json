@@ -1,6 +1,6 @@
 {
   "compilerOptions": {
-    "target": "es5",
+    "target": "es6",
     "module": "commonjs",
     "moduleResolution": "node",
     "strictNullChecks": true,
@@ -12,11 +12,10 @@
     "lib": ["es7", "dom"]
   },
   "include": [
-    "ts/**/*.ts"
+    "lib/**/*.ts"
   ],
   "exclude": [
-    "ts/**/*.test.ts",
-    "lib",
+    "lib/**/*.test.ts",
     "dist",
     "node_modules"
   ]

@@ -1,44 +1,43 @@
-/* This chat server uses "ws" for Node.js WebSockets and the "koa" web
-	framework. "node-module-concat" is used to bundle the client-side code at
-	run-time.
-*/
 import * as fs from "fs";
 import * as http from "http";
 import * as Koa from "koa";
 import * as Router from "koa-router";
-import * as moduleConcat from "node-module-concat";
-import { Server as WebSocketServer } from "ws";
-import WebSocketWrapper from "../dist/WebSocketWrapper";
+import WebSocket, { Server as WebSocketServer } from "ws";
+import WebSocketWrapper from "../lib/WebSocketWrapper";
+import { IMessage } from './interfaces';
+
+const browserify = require("browserify");
+const tsify = require("tsify");
 
 // Create new HTTP server using koa and a new WebSocketServer
-const app: Koa = new Koa();
-const router: Router = new Router();
-const server: http.Server = http.createServer(app.callback());
-const socketServer: WebSocketServer = new WebSocketServer({ server });
+const app = new Koa();
+const router = new Router();
+const server = http.createServer(app.callback());
+const socketServer = new WebSocketServer({ server });
+const PORT = process.env.PORT || 3000;
 
 // Save all connected `sockets`
 const sockets: WebSocketWrapper[] = [];
-// Save all logged in `users`; keys are usernames, values are the sockets
+
 interface IUsers {
   [key: string]: WebSocketWrapper;
 }
+
 const users: IUsers = {};
-// Listen for a socket to connect
-socketServer.on("connection", websocket => {
+
+socketServer.on("connection", (websocket: WebSocket) => {
   // Upon connection, wrap the socket and save it in the `sockets` array
   const socket = new WebSocketWrapper(websocket);
   sockets.push(socket);
 
-  // socket.emit("message", "system", "username" + " has logged in");
-  socket.on("login", (username: string) => {
-    console.log('login');
+  socket.of("chat").emit("message", <IMessage>{
+    from: "system",
+    text: 'Welcome! Please pick a username and login.'
   });
-
-  socket.emit("message", 'test');
-
+  // socket.on('open', () => {})
 
   // Setup event handlers on the socket
-  socket.of("chat").on("login", (username: string) => {
+  socket.of("chat").on("login", (username: string): IMessage => {
     if (
       username === "system" ||
       (users[username] && users[username] !== socket)
@@ -47,67 +46,56 @@ socketServer.on("connection", websocket => {
       throw new Error(`Username '${username}' is taken!`);
     } else {
       // Notify all other users
-      for (const i in users) {
-        if (users.hasOwnProperty(i)) {
-          users[i]
-            .of("chat")
-            .emit("message", "system", username + " has logged in");
-        }
-      }
+      broadcastMessage("system", `${username} has logged in`);
       // Save the username
       socket.set("username", username);
       users[username] = socket;
+      // Answer the request
+      return { from: "system", text: "You have been logged in" }
     }
-    return 'Test';
   });
-  socket.of("chat").on("message", msg => {
-    console.log(msg);
+
+  socket.of("chat").on("message", text => {
     const username = socket.get("username");
     if (username) {
-      // We're logged in, so relay the message to all clients
-      for (const i in users) {
-        if (users.hasOwnProperty(i)) {
-          users[i].of("chat").emit("message", username, msg);
-        }
-      }
+      broadcastMessage(username, text);
     } else {
       throw new Error("Please log in first!");
     }
   });
-  socket.of("chat").on("logout", () => {
+
+  socket.of("chat").on("logout", (): IMessage => {
     const username = socket.get("username");
     if (users[username]) {
       delete users[username];
       // Notify all other users
-      for (const i in users) {
-        if (users.hasOwnProperty(i)) {
-          users[i]
-            .of("chat")
-            .emit("message", "system", username + " has logged out");
-        }
-      }
+      broadcastMessage("system", `${username} has logged out`);
     }
+    return { from: "system", text: "You have been logged out" }
   });
+
   // Upon disconnect, free resources
   socket.on("disconnect", () => {
     const idx = sockets.indexOf(socket);
-    if (idx >= 0) {
-      sockets.splice(idx, 1);
-    }
+    if (idx >= 0) sockets.splice(idx, 1);
     const username = socket.get("username");
     if (users[username]) {
       delete users[username];
       // Notify all other users
-      for (const i in users) {
-        if (users.hasOwnProperty(i)) {
-          users[i]
-            .of("chat")
-            .emit("message", "system", username + " has logged out");
-        }
-      }
+      broadcastMessage("system", `${username} has logged out`);
     }
   });
 });
+
+const broadcastMessage = (from: string, text: string) => {
+  for (const i in users) {
+    if (users.hasOwnProperty(i)) {
+      users[i]
+        .of("chat")
+        .emit("message", <IMessage>{ from, text });
+    }
+  }
+}
 
 // Setup koa router
 app.use(router.routes());
@@ -116,34 +104,16 @@ router.get("/", async (ctx, next) => {
   ctx.type = "text/html";
   ctx.body = fs.createReadStream(__dirname + "/index.html");
 });
-router.get("/client_build.js", async ctx => {
-  await buildClient();
+
+router.get("/client.js", async ctx => {
   ctx.type = "text/javascript";
-  ctx.body = fs.createReadStream(__dirname + "/client_build.js");
+  ctx.body = browserify()
+    .add(__dirname + "/client.ts")
+    .plugin("tsify", { project: __dirname + "/tsconfig.json" })
+    .bundle()
 });
 
-// Start the server after building client_build.js
-const PORT = process.env.PORT || 3000;
+// Start the server
 server.listen(PORT, (): void => {
   console.log("Listening on port " + PORT);
 });
-
-// Build client.js using "node-module-concat"
-const buildClient = () => {
-  return new Promise((resolve, reject) => {
-    moduleConcat(
-      __dirname + "/client.js",
-      __dirname + "/client_build.js",
-      {
-        includeNodeModules: true
-      },
-      (err, files) => {
-        if (err) {
-          reject(err);
-        }
-        // console.log(`${files.length} files combined into build:\n`, files);
-        resolve();
-      }
-    );
-  });
-};

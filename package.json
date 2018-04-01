@@ -4,37 +4,35 @@
   "description": "Lightweight WebSocket wrapper lib with socket.io-like event handling, requests, and channels",
   "main": "",
   "types": "",
-  "browser": {
-    "events": "eventemitter3"
-  },
   "dependencies": {
-    "eventemitter3": ">=2 <3",
-    "mock-socket": "^7.1.0",
-    "universal-websocket-client": "^1.0.1"
+    "@types/debug": "0.0.30",
+    "debug": "^3.1.0"
   },
   "devDependencies": {
     "@types/jest": "^22.1.4",
     "@types/koa": "^2.0.44",
     "@types/koa-router": "^7.0.27",
     "@types/ws": "^4.0.1",
+    "browserify": "^16.2.2",
     "husky": "^0.14.3",
     "jest": "^22.4.2",
     "jest-cli": "^22.4.2",
     "koa": "^2.0.0",
     "koa-router": "^7.4.0",
     "lint-staged": "^7.0.0",
-    "node-module-concat": ">=1.5 <2",
+    "mock-socket": "^7.1.0",
     "nodemon": "^1.17.1",
     "prettier": "^1.11.1",
     "ts-jest": "^22.4.1",
     "ts-node": "^5.0.1",
+    "tsify": "^4.0.0",
     "tslint": "^5.9.1",
     "tslint-config-prettier": "^1.9.0",
     "typescript": "^2.7.2",
     "ws": "^1.1.1"
   },
   "scripts": {
-    "pretest": "tslint -c tslint.json 'ts/**/*.ts'",
+    "pretest": "tslint -c tslint.json 'lib/**/*.ts'",
     "precommit": "lint-staged",
     "prepack": "rm -rf dist/ && tsc -p tsconfig.publish.json && npm test",
     "test": "jest --coverage",
@@ -43,7 +41,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/bminer/ws-wrapper.git"
+    "url": ""
   },
   "keywords": [
     "websocket",
@@ -72,16 +70,15 @@
       "example-app/client_build.js"
     ],
     "watch": [
-      "example-app",
-      "dist"
+      "example-app"
     ],
     "env": {
       "NODE_ENV": "development"
     },
-    "ext": "ts js",
+    "ext": "ts",
     "events": {
-      "restart": "# npm run test",
-      "start": "# npm run test"
+      "restart": "# tsc -p example-app/tsconfig.json",
+      "start": "# tsc -p example-app/tsconfig.json"
     }
   },
   "jest": {
@@ -91,7 +88,7 @@
     "transform": {
       "^.+\\.tsx?$": "ts-jest"
     },
-    "testRegex": "(/__tests__/.*|(\\.|/)(test|spec))\\.tsx?$",
+    "testRegex": "/__tests__/.*\\.(test|spec)\\.tsx?$",
     "moduleFileExtensions": [
       "ts",
       "tsx",
